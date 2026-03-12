@@ -34,7 +34,7 @@ Usage:
   ./build-intel.sh [path/to/Codex.dmg]
 
 Behavior:
-  - Reads source DMG from ../Codex.dmg by default (or explicit path argument)
+  - Reads source DMG from ./Codex.dmg or ../Codex.dmg by default (or explicit path argument)
   - Never modifies the original DMG
   - Uses .tmp/* for all build steps
   - Writes full logs to log.txt
@@ -64,7 +64,7 @@ exec > >(tee -a "${LOG_FILE}") 2>&1
 
 log "Starting Intel build pipeline"
 log "Script dir: ${SCRIPT_DIR}"
-log "Default source location: ${SCRIPT_PARENT_DIR}/Codex.dmg"
+log "Default source locations: ${SCRIPT_DIR}/Codex.dmg, ${SCRIPT_PARENT_DIR}/Codex.dmg"
 log "Work dir: ${WORK_DIR}"
 mkdir -p "${WORK_DIR}"
 
@@ -85,17 +85,23 @@ fi
 
 # Resolve source DMG path:
 # 1) explicit argument
-# 2) ../Codex.dmg
-# 3) single *.dmg in parent directory (if present)
+# 2) ./Codex.dmg
+# 3) ../Codex.dmg
+# 4) single *.dmg in current/parent directory (if present)
 if [[ $# -eq 1 ]]; then
   INPUT_DMG="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 else
-  if [[ -f "${SCRIPT_PARENT_DIR}/Codex.dmg" ]]; then
+  if [[ -f "${SCRIPT_DIR}/Codex.dmg" ]]; then
+    INPUT_DMG="${SCRIPT_DIR}/Codex.dmg"
+  elif [[ -f "${SCRIPT_PARENT_DIR}/Codex.dmg" ]]; then
     INPUT_DMG="${SCRIPT_PARENT_DIR}/Codex.dmg"
   else
-    mapfile -t found_dmgs < <(find "${SCRIPT_PARENT_DIR}" -maxdepth 1 -type f -name "*.dmg" ! -name "$(basename "${OUTPUT_DMG}")" | sort)
+    found_dmgs=()
+    while IFS= read -r dmg_path; do
+      found_dmgs+=("${dmg_path}")
+    done < <(find "${SCRIPT_DIR}" "${SCRIPT_PARENT_DIR}" -maxdepth 1 -type f -name "*.dmg" ! -name "$(basename "${OUTPUT_DMG}")" | sort -u)
     if [[ ${#found_dmgs[@]} -eq 0 ]]; then
-      die "No source DMG found. Put Codex.dmg next to this repo folder (../Codex.dmg) or pass a path."
+      die "No source DMG found. Put Codex.dmg in this repo, next to this repo folder, or pass a path."
     fi
     if [[ ${#found_dmgs[@]} -gt 1 ]]; then
       printf '%s\n' "${found_dmgs[@]}"
