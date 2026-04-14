@@ -3,13 +3,14 @@ set -euo pipefail
 
 # Resolve script and workspace paths.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_PARENT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TMP_BASE="${SCRIPT_DIR}/.tmp"
 LOG_FILE="${SCRIPT_DIR}/log.txt"
 OUTPUT_DMG="${SCRIPT_DIR}/CodexAppMacIntel.dmg"
 RUN_ID="$(date +%Y%m%d_%H%M%S)"
 WORK_DIR="${TMP_BASE}/codex_intel_build_${RUN_ID}"
 MOUNT_POINT="${WORK_DIR}/mount"
+SOURCE_DMG_URL="https://persistent.oaistatic.com/codex-app-prod/Codex.dmg"
+DOWNLOADED_DMG="${WORK_DIR}/Codex.dmg"
 
 # Runtime flags/state used by cleanup and mount logic.
 ATTACHED_BY_SCRIPT=0
@@ -28,13 +29,48 @@ die() {
   exit 1
 }
 
+download_source_dmg() {
+  local output_path="$1"
+  local partial_path="${output_path}.part"
+
+  log "Downloading latest Codex.dmg"
+  log "Source URL: ${SOURCE_DMG_URL}"
+
+  rm -f "${partial_path}" "${output_path}"
+  curl --fail --location --retry 3 --retry-delay 2 --connect-timeout 30 --output "${partial_path}" "${SOURCE_DMG_URL}" || \
+    die "Failed to download source DMG from ${SOURCE_DMG_URL}"
+  [[ -s "${partial_path}" ]] || die "Downloaded DMG is empty: ${partial_path}"
+
+  mv "${partial_path}" "${output_path}"
+}
+
+remove_stale_local_codex_dmgs() {
+  local stale_dmgs=()
+  local dmg_path
+
+  while IFS= read -r dmg_path; do
+    stale_dmgs+=("${dmg_path}")
+  done < <(find "${SCRIPT_DIR}" -maxdepth 1 -type f -iname 'codex.dmg' | sort)
+
+  if [[ ${#stale_dmgs[@]} -eq 0 ]]; then
+    log "No stale local Codex.dmg found in repo root"
+    return
+  fi
+
+  for dmg_path in "${stale_dmgs[@]}"; do
+    log "Removing stale local source DMG: ${dmg_path}"
+    rm -f "${dmg_path}" || die "Failed to remove stale local source DMG: ${dmg_path}"
+  done
+}
+
 usage() {
   cat <<'EOF'
 Usage:
-  ./build-intel.sh [path/to/Codex.dmg]
+  ./build-intel.sh
 
 Behavior:
-  - Reads source DMG from ./Codex.dmg or ../Codex.dmg by default (or explicit path argument)
+  - Downloads the latest official Codex.dmg from https://persistent.oaistatic.com/codex-app-prod/Codex.dmg on every run
+  - Removes any existing local Codex.dmg in the repo root before downloading
   - Never modifies the original DMG
   - Uses .tmp/* for all build steps
   - Writes full logs to log.txt
@@ -64,12 +100,12 @@ exec > >(tee -a "${LOG_FILE}") 2>&1
 
 log "Starting Intel build pipeline"
 log "Script dir: ${SCRIPT_DIR}"
-log "Default source locations: ${SCRIPT_DIR}/Codex.dmg, ${SCRIPT_PARENT_DIR}/Codex.dmg"
+log "Source download URL: ${SOURCE_DMG_URL}"
 log "Work dir: ${WORK_DIR}"
 mkdir -p "${WORK_DIR}"
 
 # Validate required tools early.
-for cmd in hdiutil ditto npm npx node file codesign xattr; do
+for cmd in curl hdiutil ditto npm npx node file codesign xattr; do
   command -v "${cmd}" >/dev/null 2>&1 || die "Missing required command: ${cmd}"
 done
 
@@ -78,40 +114,14 @@ if [[ $# -gt 0 && ( "$1" == "-h" || "$1" == "--help" ) ]]; then
   exit 0
 fi
 
-if [[ $# -gt 1 ]]; then
+if [[ $# -gt 0 ]]; then
   usage
-  die "Too many arguments"
+  die "This script no longer accepts a local DMG path. It always downloads the latest Codex.dmg first."
 fi
 
-# Resolve source DMG path:
-# 1) explicit argument
-# 2) ./Codex.dmg
-# 3) ../Codex.dmg
-# 4) single *.dmg in current/parent directory (if present)
-if [[ $# -eq 1 ]]; then
-  INPUT_DMG="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
-else
-  if [[ -f "${SCRIPT_DIR}/Codex.dmg" ]]; then
-    INPUT_DMG="${SCRIPT_DIR}/Codex.dmg"
-  elif [[ -f "${SCRIPT_PARENT_DIR}/Codex.dmg" ]]; then
-    INPUT_DMG="${SCRIPT_PARENT_DIR}/Codex.dmg"
-  else
-    found_dmgs=()
-    while IFS= read -r dmg_path; do
-      found_dmgs+=("${dmg_path}")
-    done < <(find "${SCRIPT_DIR}" "${SCRIPT_PARENT_DIR}" -maxdepth 1 -type f -name "*.dmg" ! -name "$(basename "${OUTPUT_DMG}")" | sort -u)
-    if [[ ${#found_dmgs[@]} -eq 0 ]]; then
-      die "No source DMG found. Put Codex.dmg in this repo, next to this repo folder, or pass a path."
-    fi
-    if [[ ${#found_dmgs[@]} -gt 1 ]]; then
-      printf '%s\n' "${found_dmgs[@]}"
-      die "Multiple DMGs found. Pass source DMG path explicitly."
-    fi
-    INPUT_DMG="${found_dmgs[0]}"
-  fi
-fi
-
-[[ -f "${INPUT_DMG}" ]] || die "Source DMG not found: ${INPUT_DMG}"
+remove_stale_local_codex_dmgs
+download_source_dmg "${DOWNLOADED_DMG}"
+INPUT_DMG="${DOWNLOADED_DMG}"
 log "Source DMG: ${INPUT_DMG}"
 
 # Mount source DMG in read-only mode.

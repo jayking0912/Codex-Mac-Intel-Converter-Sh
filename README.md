@@ -14,24 +14,24 @@ This is an unofficial adaptation approach, similar in spirit to the Linux commun
 ## Requirements
 
 - macOS
-- `bash`, `hdiutil`, `ditto`, `codesign`
+- `bash`, `curl`, `hdiutil`, `ditto`, `codesign`
 - Node.js + npm (used by the script to fetch Electron/runtime dependencies)
+- Internet access to download the official `Codex.dmg`
 
 ## Quick usage
 
-1. Put your original `Codex.dmg` next to the repo folder (not inside it), so it is available as `../Codex.dmg`.
-2. Run:
+1. Run:
 
 ```bash
 chmod +x ./build-intel.sh
 ./build-intel.sh
 ```
 
-Or:
+The script now downloads the latest official `Codex.dmg` from:
 
-```bash
-./build-intel.sh /absolute/path/to/Codex.dmg
-```
+`https://persistent.oaistatic.com/codex-app-prod/Codex.dmg`
+
+on every run, deletes any existing local `Codex.dmg` in the repo root first, mounts the fresh download, and then rebuilds the app into an Intel-compatible DMG.
 
 ## Output
 
